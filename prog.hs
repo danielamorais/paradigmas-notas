@@ -1,29 +1,85 @@
 import Debug.Trace
 import Data.List
-import Data.Char (isSpace)
+import Data.Char 
 
-data Edge = Edge { node::Node, weight::Float } deriving (Show)
+data Edge = Edge { node::Node, weight::Float } deriving (Eq,Show,Read)
 type Node = String
 type Graph = [(Node, [Edge])]
 type Dnode = (Node, (Float, Node))
 
-main = do 
-	entrada <- getContents
-    	let infos = lines entrada
-	let partida = getRota head infos                                         
-       	let destino = getRota last infos
-	let infosLimpas = limparEntrada infos
-	let texto = (intercalate "\n" infosLimpas)
-	let g = fromText texto True
-	print g
-	print partida
-	print destino
-	let soln = dijkstra g partida
-	let caminho = pathToNode soln destino
-	print caminho
-	print 0
 
-getRota ref linha = (ref (words $ last linha))
+main = do 
+	input <- getContents
+    	let infos = lines input
+	let start = getRoute head infos                                         
+       	let end = getRoute last infos
+	let cleanText = cleanInput infos
+	let text = (intercalate "\n" cleanText)
+	let g = fromText text True
+	let soln = dijkstra g start
+	let solution = listToNode soln end
+	print solution
+	print (weightForDnode (last(pathToNode soln end)))
+
+weightForDnode :: Dnode -> Float
+weightForDnode (_, (w, _)) = w
+
+buildLines [] = []
+buildLines (x:xs) = if length xs > 0 then [x ++ " " ++ head(xs)] ++ buildLines(xs)
+			else []  
+
+--Obter nome da linha de acordo com referencias, por exemplo: a b 
+getLineName linha [] = ""
+getLineName linha (x:xs) = if (isInfixOf linha x) then (head((wordsWhen (==' ') (replace x linha ""))))
+			    	else getLineName linha xs
+
+--Obter o tempo de espera de acordo com o nome da linha, por exemplo: linha-456
+getWaiting linha [] = 0
+getWaiting linha (x:xs) = if (isInfixOf linha x) then ((digitToInt(head(last((wordsWhen (==' ') x))))) `div` 2)
+			    	else getWaiting linha xs
+
+dijkstra :: Graph -> Node -> [Dnode]
+dijkstra g start = 
+  let dnodes = initD g start
+      unchecked = map fst dnodes
+  in  dijkstra' g dnodes unchecked
+
+initD :: Graph -> Node -> [Dnode]
+initD g start =
+  let initDist (n, es) = 
+        if n == start 
+        then 0 
+        else if start `elem` connectedNodes es
+             then weightFor start es
+             else 1.0/0.0
+  in map (\pr@(n, _) -> (n, ((initDist pr), start))) g
+
+dijkstra' :: Graph -> [Dnode] -> [Node] -> [Dnode]
+dijkstra' g dnodes [] = dnodes
+dijkstra' g dnodes unchecked = 
+  let dunchecked = filter (\dn -> (fst dn) `elem` unchecked) dnodes
+      current = head . sortBy (\(_,(d1,_)) (_,(d2,_)) -> compare d1 d2) $ dunchecked
+      c = fst current
+      unchecked' = delete c unchecked
+      edges = edgesFor g c
+      cnodes = intersect (connectedNodes edges) unchecked'
+      dnodes' = map (\dn -> update dn current cnodes edges) dnodes
+  in dijkstra' g dnodes' unchecked' 
+
+update :: Dnode -> Dnode -> [Node] -> [Edge] -> Dnode
+update dn@(n, (nd, p)) (c, (cd, _)) cnodes edges =
+  let wt = weightFor n edges
+  in  if n `notElem` cnodes then dn
+      else if cd+wt < nd then (n, (cd+wt, c)) else dn
+
+pathToNode dnodes dest = 
+  let dn@(n, (d, p)) = dnodeForNode dnodes dest
+  in if n == p then [dn] else pathToNode dnodes p ++ [dn]
+
+listToNode :: [Dnode] -> Node -> [Node]
+listToNode dnodes dest = 
+  let dn@(n, (d, p)) = dnodeForNode dnodes dest
+  in if n == p then [n] else listToNode dnodes p ++ [n]
 
 replace :: Eq a => [a] -> [a] -> [a] -> [a]
 replace [] _ _ = []
@@ -45,17 +101,12 @@ wordsWhen p s =  case dropWhile p s of
                       s' -> w : wordsWhen p s''
                             where (w, s'') = break p s'
 
-limparEntrada [] = []
-limparEntrada (x:xs) =  
+cleanInput [] = []
+cleanInput (x:xs) =  
 	if (countLetters x ' ') > 2 then 
-		if (isInfixOf "a-pe" x) then [trim $ replace x "a-pe " ""] ++ limparEntrada(xs)
-		else [take 3 x ++ " " ++ last(wordsWhen (==' ') x)] ++ limparEntrada(xs)
+		if (isInfixOf "a-pe" x) then [trim $ replace x "a-pe " ""] ++ cleanInput(xs)
+		else [take 3 x ++ " " ++ last(wordsWhen (==' ') x)] ++ cleanInput(xs)
 	else []
-
-
--- Get a weighted graph from a multiline text string, where each line specifies two nodes and a weight
--- If the data already represents a directed graph just pass along the edges, otherwise
--- append reversed edges.  This avoids redundant data when working with non-directed graphs.
 
 fromText :: String -> Bool -> Graph
 fromText strLines isDigraph = 
@@ -68,9 +119,6 @@ fromText strLines isDigraph =
 appendReversed :: [((String, String), Float)] -> [((String, String), Float)]
 appendReversed es = es ++ map (\((n1,n2),w) -> ((n2,n1),w)) es
 
--- Takes a list of pairs where the first element is a two-member list 
--- of nodes in any order and the second element is the weight for the edge connecting them.
-
 fromList :: [((String, String), Float)] -> Graph
 fromList es =
   let nodes = nub . map (fst . fst) $ es
@@ -79,68 +127,20 @@ fromList es =
         in map (\((_,n),wt) -> Edge n wt) connected 
   in map (\n -> (n, edgesFor es n)) nodes
 
--- Given a weighted graph and a node, return the edges incident on the node
+getLines infos = filter (\n -> isInfixOf "linha-" n && countLetters n ' ' == 1) infos
+
+getLinesInfo infos = filter (\n -> isInfixOf "linha-" n && countLetters n ' ' > 2) infos
+
+getRoute ref linha = (ref (words $ last linha))
+
 edgesFor :: Graph -> Node -> [Edge]
 edgesFor g n = snd . head . filter (\(nd, _) -> nd == n) $ g
 
--- Given a node and a list of edges, one of which is incident on the node, return the weight
 weightFor :: Node -> [Edge] -> Float
 weightFor n = weight . head . filter (\e -> n == node e)
 
--- Given a list of edges, return their nodes
 connectedNodes :: [Edge] -> [Node]
 connectedNodes = map node
 
 dnodeForNode :: [Dnode] -> Node -> Dnode
 dnodeForNode dnodes n = head . filter (\(x, _) -> x == n) $ dnodes
-
--- Given a graph and a start node
-dijkstra :: Graph -> Node -> [Dnode]
-dijkstra g start = 
-  let dnodes = initD g start
-      unchecked = map fst dnodes
-  in  dijkstra' g dnodes unchecked
-
--- Given a graph and a start node, construct an initial list of Dnodes
-initD :: Graph -> Node -> [Dnode]
-initD g start =
-  let initDist (n, es) = 
-        if n == start 
-        then 0 
-        else if start `elem` connectedNodes es
-             then weightFor start es
-             else 1.0/0.0
-  in map (\pr@(n, _) -> (n, ((initDist pr), start))) g
-
--- Dijkstra's algorithm (recursive)
--- get a list of Dnodes that haven't been checked yet
--- select the one with minimal distance and add it to the checked list. Call it current.
--- update each Dnode that connects to current by comparing 
--- the Dnode's current distance to the sum: (weight of the connecting edge + current's distance)
--- the algorithm terminates when all nodes have been checked.
-
-dijkstra' :: Graph -> [Dnode] -> [Node] -> [Dnode]
-dijkstra' g dnodes [] = dnodes
-dijkstra' g dnodes unchecked = 
-  let dunchecked = filter (\dn -> (fst dn) `elem` unchecked) dnodes
-      current = head . sortBy (\(_,(d1,_)) (_,(d2,_)) -> compare d1 d2) $ dunchecked
-      c = fst current
-      unchecked' = delete c unchecked
-      edges = edgesFor g c
-      cnodes = intersect (connectedNodes edges) unchecked'
-      dnodes' = map (\dn -> update dn current cnodes edges) dnodes
-  in dijkstra' g dnodes' unchecked' 
-
--- given a Dnode to update, the current Dnode, the Nodes connected to current 
--- and current's edges, return a (possibly) updated Dnode
-update :: Dnode -> Dnode -> [Node] -> [Edge] -> Dnode
-update dn@(n, (nd, p)) (c, (cd, _)) cnodes edges =
-  let wt = weightFor n edges
-  in  if n `notElem` cnodes then dn
-      else if cd+wt < nd then (n, (cd+wt, c)) else dn
-
--- given a Dijkstra solution and a destination node, return the path to it.
-pathToNode :: [Dnode] -> Node -> [Node]
-pathToNode dnodes dest = 
-  let dn@(n, (d, p)) = dnodeForNode dnodes dest
-  in if n == p then [n] else pathToNode dnodes p ++ [n]
